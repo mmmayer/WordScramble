@@ -76,7 +76,7 @@ struct ContentView: View {
                     // toggles the text to be displayed depending on whether the game is in session
                     Text(gameOver ? "Score: \(gameScore)" : "Time: \(timeRemaining)")
                         .font(.largeTitle)
-                        .foregroundColor(.white)
+                        .foregroundColor(timeRemaining > 9 || gameOver ? .white : .red)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 5)
                         .background(
