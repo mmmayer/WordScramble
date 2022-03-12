@@ -64,7 +64,7 @@ struct ContentView: View {
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                     
                         // changes the color of the text to red if the word (so far) won't be accepted
-                        .foregroundColor(isValid(newWord) ? .black : .red)
+                        .foregroundColor(isValid(newWord) ? .primary : .red)
                         .padding()
                     List(usedItems) { item in
                             HStack {
