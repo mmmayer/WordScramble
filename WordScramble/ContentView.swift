@@ -7,6 +7,7 @@
 // Inspired by Paul Hudson at [HackingWithSwift.com](https://www.hackingwithswift.com), this started as an exercise that was part of his [100 Days of SwiftUI](https://www.hackingwithswift.com/100/swiftui).
 
 import SwiftUI
+import Algorithms   // uniquePermutations(ofCount:) used in func generateWords(from: String)
 
 // Contains the elements to be displayed in each row of the list
 struct ListItem : Identifiable {
@@ -15,18 +16,52 @@ struct ListItem : Identifiable {
     var imageName: String
 }
 
-// Contains the list of all eight letter words to be drawn from for root words
-var allWords = [String]()
+extension Int {
+    // computes the word's game score based on the word's length
+    // Word Length Score
+    //        3     3
+    //        4     4
+    //        5     6
+    //        6     8
+    //        7     13
+    //        8     18
+    func wordScore() -> Int {
+        switch self {
+            case 3:
+                return 3
+            case 4:
+                return 4
+            case 5:
+                return 6
+            case 6:
+                return 8
+            case 7:
+                return 13
+            case 8:
+                return 18
+            default:
+                return 0
+        }
+    }
+}
 
+// Contains the list of all eight letter words from which the root word is chosen randomly
+var allWords = [String]()
+// Contains the list of all valid words that can be formed from the root word
+var possibleWords = [String]()
+// The text checker.  It gets used 10s of thousands of times to determine if text is a real word so doing a single instantiation here.
+let checker = UITextChecker()
+
+// game duration in seconds
+let timeLimit = 90
 
 struct ContentView: View {
-    
     // Accepted word items
     @State private var usedItems = [ListItem]()
-    // The word the user derives other words from.  Randomly chosen from allWords
+    // The word the user derives other words from.  Randomly chosen from allWords.  These are all of length 8.
     @State private var rootWord = ""
     // The word answer the user is in the process of generating
-    @State private var newWord = ""
+    @State private var userWord = ""
     // Causes focus to be on the input textfield
     @FocusState private var isFocused: Bool
 
@@ -37,7 +72,7 @@ struct ContentView: View {
     @State private var isFatalError = false
     
     // tracks and displays the time remaining
-    @State private var timeRemaining = 90
+    @State private var timeRemaining = timeLimit
     // A user default that maintains a record of the highest score achieved
     @AppStorage("highScore") private var highScore = 0
     // the current game score
@@ -57,14 +92,13 @@ struct ContentView: View {
                     .ignoresSafeArea(.all)
 
                 VStack {
-                    TextField("Enter your word", text: $newWord, onCommit: addNewWord)
+                    TextField("Enter your word", text: $userWord, onCommit: addNewWord)
                         .focused($isFocused)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                    
                         // changes the color of the text to red if the word (so far) won't be accepted
-                        .foregroundColor(isValid(newWord) ? .primary : .red)
+                        .foregroundColor(isValid(userWord) ? .primary : .red)
                         .padding()
                     List(usedItems) { item in
                             HStack {
@@ -72,10 +106,19 @@ struct ContentView: View {
                                 Text(item.word)
                             }
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, -5)
+                    // Displays a link to a NavView of all the words that could be formed from the rootword
+                    if gameOver {
+                        HStack {
+                            NavigationLink("All Possible Words", destination: AllAnswersView(usedWords: usedItems.map(\.word)))
+                                .padding(.horizontal)
+                            Spacer()
+                        }
+                    }
                     // toggles the text to be displayed depending on whether the game is in session
                     Text(gameOver ? "Score: \(gameScore)" : "Time: \(timeRemaining)")
-                        .font(.largeTitle)
+                        .font(.title2)
+                        .bold()
                         .foregroundColor(timeRemaining > 9 || gameOver ? .white : .red)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 5)
@@ -91,7 +134,9 @@ struct ContentView: View {
                 .navigationBarTitle(rootWord)
                 
                 // performs all the start-up functions
-                .onAppear(perform: startGame)
+                .task {
+                    if !gameOver { startGame() }
+                }
                 
                 // displays an alert if an error is detected, then quits the game if the error is fatal.
                 .alert(errorTitle, isPresented: $showError) {
@@ -104,10 +149,10 @@ struct ContentView: View {
                     Text(errorMessage)
                 }
             }
-            .navigationBarItems(trailing: Button(action: newGame) {
+            .navigationBarItems(trailing: Button(action: newGame ) {
                 Text("New Game")
                     .bold()
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
             })
             
             // When the timer fires, the time remaining is updated.  The game ends when the time reaches zero.
@@ -130,13 +175,18 @@ struct ContentView: View {
     
     // performs all the start-up functions like loading the list of root words and setting the root word
     // All errors here are fatal
-    func startGame() {
+    func startGame()  {
         isFocused = true
         if let startWordsURL = Bundle.main.url(forResource: "start", withExtension: "txt") {
             if let startWords = try? String(contentsOf: startWordsURL) {
                 allWords = startWords.components(separatedBy: "\n")
                 if let randomWord = allWords.randomElement() {
                     rootWord = randomWord
+                    // Starts a background task to find all the legal words to display after the game is over.
+                    // Takes about 20-30 seconds.  There are over 109,000 permutations of 8 letters of length 3...8
+                    Task {
+                        possibleWords =  generateWords(from: rootWord)
+                    }
                     return
                 }
                 else {
@@ -156,13 +206,18 @@ struct ContentView: View {
     // Creates a new game, reseting variables to their starting values.  Gets a new root word.
     func newGame() {
         isFocused = true
-        timeRemaining = 90
-        newWord = ""
+        timeRemaining = timeLimit
+        userWord = ""
         gameScore = 0
         gameOver = false
         usedItems.removeAll()
         if let randomWord = allWords.randomElement() {
             rootWord = randomWord
+            // Starts a background task to find all the legal words to display after the game is over.
+            // Takes about 20-30 seconds.  There are over 109,000 permutations of 8 letters of length 3...8
+            Task {
+                possibleWords = generateWords(from: rootWord)
+            }
         }
         else {
             wordError(title: "Fatal Error", message: "List of words from start.txt appears to be empty.")
@@ -170,7 +225,8 @@ struct ContentView: View {
         }
     }
     
-    // Called when a new word is submitted.  Checks it for validity and if valid, adds it to the list of accepted words.
+    // Called when a new word is submitted by the user.
+    // Checks it for validity and if valid, adds it to the list of accepted words.
     func addNewWord() {
         // resets focus to the textfield after a word is submitted
         isFocused = true
@@ -181,14 +237,14 @@ struct ContentView: View {
         }
         
         // An easter egg that allows the high score to be reset.
-        if newWord == "XXX" {
+        if userWord == "XXX" {
             highScore = 0
-            newWord = ""
+            userWord = ""
             return
         }
         
         // lowercase and trim the word, to make sure we don't add duplicate words with case differences
-        let answer = newWord.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let answer = userWord.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         
         // The following four guard statements are all checks on the validity of the answer submitted.
         // An error is flagged if any of these checks fail
@@ -216,27 +272,15 @@ struct ContentView: View {
         // The list of updated accepted words is then displayed with animation.
         // The score is updated with the value of the accepted word.
         withAnimation {
-            usedItems.insert(ListItem(word: answer, imageName: "\(wordScore(answer)).circle"), at: 0)
-            newWord = ""
+            usedItems.insert(ListItem(word: answer, imageName: "\(answer.count.wordScore()).circle"), at: 0)
+            userWord = ""
         }
-        gameScore += wordScore(answer)
+        gameScore += answer.count.wordScore()
     }
     
     // Combines all the different validy checks without setting the error flag
     func isValid(_ word: String) -> Bool {
         isOriginal(word: word) && isPossible(word: word) && isLongEnough(word: word) && isReal(word: word)
-    }
-    
-    // Word Count Score - computes the word's game score
-    //        3    3
-    //        4    4
-    //        5    6
-    //        6    8
-    //        7    13
-    //        8    18
-    func wordScore(_ word: String) -> Int {
-        let count = word.count
-        return count + max(0, count - 4) + max(0, count - 5) + max(0, count - 6) + max(0, count - 7)
     }
     
     // makes sure that the word submitted hasn't already been accepted or is the same as the root word
@@ -265,11 +309,24 @@ struct ContentView: View {
     
     // the submitted word must be an actual word found in the game's dictionary.
     func isReal(word: String) -> Bool {
-        let checker = UITextChecker()
         let range = NSRange(location: 0, length: word.utf16.count)
-        let misspelledRange = checker.rangeOfMisspelledWord(in: word, range: range, startingAt: 0, wrap: false, language: "en")
+        let misspelledRange = checker.rangeOfMisspelledWord(in: word, range: range, startingAt: 0, wrap: false, language: "en_US")
         
         return misspelledRange.location == NSNotFound
+    }
+    
+    // Generates all the legal words to display after the game is over.
+    // Takes about 20-30 seconds.  There are over 109,000 permutations of 8 letters of length 3...8
+    // Uses UITextChecker() in isReal()
+    func generateWords(from rootWord: String) -> [String] {
+        var words = [String]()
+        for perm in rootWord.uniquePermutations(ofCount: 3...8) {       // 109,536 permutations
+            let str = String(perm)
+            if isReal(word: str) && !(str.count == 8 && str == rootWord) {
+                words.append(str)
+            }
+        }
+        return words
     }
     
     // called when a submitted word is not valid - sets up the error to be shown
