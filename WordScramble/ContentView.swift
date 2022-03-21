@@ -64,7 +64,7 @@ struct ContentView: View {
     @State private var userWord = ""
     // Causes focus to be on the input textfield
     @FocusState private var isFocused: Bool
-
+    
     // These contain error messages or determine when an error message should be shown
     @State private var errorTitle = ""
     @State private var errorMessage = ""
@@ -73,12 +73,17 @@ struct ContentView: View {
     
     // tracks and displays the time remaining
     @State private var timeRemaining = timeLimit
-    // A user default that maintains a record of the highest score achieved
-    @AppStorage("highScore") private var highScore = 0
     // the current game score
     @State private var gameScore = 0
     // tracks whether a game is being played or is over
     @State private var gameOver = false
+    
+    // A user default that pesists the game mode - timed or untimed
+    @AppStorage("timeMode") private var isTimedMode = true
+    // A user default that maintains a record of the highest score achieved while timed
+    @AppStorage("highScore") private var highScore = 0
+    // A user default that maintains a record of the highest score achieved while untimed
+    @AppStorage("untimedHighScore") private var untimedHighScore = 0
     
     // a timer on the main event loop which triggers every second so the time remaining can be updated
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -90,21 +95,21 @@ struct ContentView: View {
                 LinearGradient(colors: [Color(red: 81.0/255.0, green: 0.75, blue: 1), Color.teal, .yellow, .yellow], startPoint: .top, endPoint: .bottom)
                     .rotationEffect(.degrees(10))
                     .ignoresSafeArea(.all)
-
+                
                 VStack {
                     TextField("Enter your word", text: $userWord, onCommit: addNewWord)
                         .focused($isFocused)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        // changes the color of the text to red if the word (so far) won't be accepted
+                    // changes the color of the text to red if the word (so far) won't be accepted
                         .foregroundColor(isValid(userWord) ? .primary : .red)
                         .padding()
                     List(usedItems) { item in
-                            HStack {
-                                Image(systemName: item.imageName)
-                                Text(item.word)
-                            }
+                        HStack {
+                            Image(systemName: item.imageName)
+                            Text(item.word)
+                        }
                     }
                     .padding(.horizontal, -5)
                     // Displays a link to a NavView of all the words that could be formed from the rootword
@@ -115,21 +120,33 @@ struct ContentView: View {
                             Spacer()
                         }
                     }
-                    // toggles the text to be displayed depending on whether the game is in session
-                    Text(gameOver ? "Score: \(gameScore)" : "Time: \(timeRemaining)")
-                        .font(.title2)
-                        .bold()
-                        .foregroundColor(timeRemaining > 9 || gameOver ? .white : .red)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule()
-                                .fill(Color.black)
-                                .opacity(0.75)
-                        )
-                        .padding()
+                    // toggles the text to be displayed depending on whether the game is in session and what the mode is
+                    HStack {
+                        Text(gameOver || !isTimedMode ? "Score: \(gameScore)" : "Time: \(timeRemaining)")
+                            .font(.title2)
+                            .bold()
+                            .foregroundColor(timeRemaining > 9 || gameOver ? .white : .red)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule()
+                                    .fill(Color.black)
+                                    .opacity(0.75)
+                            )
+                            .padding()
+                        // adds a End Game button if in untimed mode
+                        if !isTimedMode {
+                            Button("End Game") {
+                                gameOver = true
+                                if gameScore > untimedHighScore {
+                                    untimedHighScore = gameScore
+                                }
+                                isFocused = false
+                            }
+                        }
+                    }
                     Spacer()
-                    Text("High Score: \(highScore)")
+                    Text("High Score: \(isTimedMode ? highScore : untimedHighScore)")
                 }
                 .navigationBarTitle(rootWord)
                 
@@ -149,24 +166,35 @@ struct ContentView: View {
                     Text(errorMessage)
                 }
             }
-            .navigationBarItems(trailing: Button(action: newGame ) {
-                Text("New Game")
-                    .bold()
-                    .foregroundColor(.primary)
-            })
-            
-            // When the timer fires, the time remaining is updated.  The game ends when the time reaches zero.
-            // The high score is updated if needed when the game ends.
-            .onReceive(timer) { time in
-                if self.timeRemaining > 0 {
-                    self.timeRemaining -= 1
+            .navigationBarItems(
+                leading: Toggle(isOn: $isTimedMode) {
+                    Text("Timed Mode")
+                        .bold()
                 }
-                else {
-                    gameOver = true
-                    if gameScore > highScore {
-                        highScore = gameScore
+                    .onChange(of: isTimedMode) { value in
+                        newGame()
+                    },
+                trailing: Button(action: newGame ) {
+                    Text("New Game")
+                        .bold()
+                }
+            )
+            
+            // If in timed mode, when the timer fires, the time remaining is updated.
+            // The game ends when the time reaches zero.
+            // The high score is updated if a new high is achieved when the game ends.
+            .onReceive(timer) { time in
+                if isTimedMode {
+                    if self.timeRemaining > 0 {
+                        self.timeRemaining -= 1
                     }
-                    isFocused = false
+                    else {
+                        gameOver = true
+                        if gameScore > highScore {
+                            highScore = gameScore
+                        }
+                        isFocused = false
+                    }
                 }
             }
             
@@ -236,9 +264,14 @@ struct ContentView: View {
             return
         }
         
-        // An easter egg that allows the high score to be reset.
+        // An easter egg that allows the relevant high score to be reset.
         if userWord == "XXX" {
-            highScore = 0
+            if isTimedMode {
+                highScore = 0
+            }
+            else {
+                untimedHighScore = 0
+            }
             userWord = ""
             return
         }
